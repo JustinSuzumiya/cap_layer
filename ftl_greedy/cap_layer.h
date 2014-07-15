@@ -8,8 +8,12 @@
 
 #define cap 1
 #define random 0
-#define backlogged 0
+#define backlogged 1
 #define greedy 1
+#define dump 0
+#define dump_len 0
+#define dump_req 0
+#define lpn_list_of_cur_vblock_in_sram 1
 
 #define READ_POWER 40
 #define WRITE_POWER 40
@@ -69,7 +73,7 @@ UINT8 q_head[NUM_BANKS];
 //UINT16 cap_free_head[NUM_BANKS];
 //UINT16 cap_free_tail[NUM_BANKS];
 
-/**cap_layer record**
+/**cap_layer record**/
 UINT32 P_VBLOCK[P_MAX];
 UINT32 P_PAGE_NUM[P_MAX];
 UINT32 P_SECT_OFFSET[P_MAX];
@@ -85,8 +89,9 @@ UINT8 P_TYPE[P_MAX];
 UINT8 P_BANK[P_MAX];
 UINT8 P_ISSUE_FLAG[P_MAX];
 
+/**cap_layer record**/
 UINT8 P_BANK_STATE[NUM_BANKS];
-**cap_layer record**/
+
 
 void init_cap_queue();
 UINT16 cap_getFromFreeList(UINT8 bank);
@@ -104,6 +109,7 @@ inline void set_bank_state(UINT8 bank, UINT8 operation);
 inline UINT32 randNum();
 inline void setRand(UINT32 val);
 void randomEvict();
+void new_randombEvict();
 void randombEvict();
 void rrEvict();
 void rrbEvict();

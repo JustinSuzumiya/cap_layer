@@ -29,6 +29,8 @@ void ptimer_start(void);
 void ptimer_start_scale0(void);
 UINT32 ptimer_stop_and_uart_print(void);
 UINT32 ptimer_stop_and_uart_print_scale0(void);
+void set_timestamp(void);
+UINT32 get_timestamp(void);
 #endif
 
 #endif // MISC_H

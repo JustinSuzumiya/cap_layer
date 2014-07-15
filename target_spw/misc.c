@@ -346,6 +346,10 @@ void ptimer_start_scale0(void)
 {
     start_interval_measurement(TIMER_CH2, TIMER_PRESCALE_0);
 }
+void set_timestamp(void)
+{
+	start_interval_measurement(TIMER_CH3, TIMER_PRESCALE_2);
+}
 UINT32 ptimer_stop_and_uart_print(void)
 {
     UINT32 rtime;
@@ -370,6 +374,19 @@ UINT32 ptimer_stop_and_uart_print_scale0(void)
     //uart_print(buf);
 	return rtime;
 }
+UINT32 get_timestamp(void)
+{
+    UINT32 rtime;
+    char buf[21];
+
+    rtime = 0xFFFFFFFF - GET_TIMER_VALUE(TIMER_CH3);
+    // Tick to us
+    rtime = (UINT32)((UINT64)rtime * 2 * 1000000 * PRESCALE_TO_DIV(TIMER_PRESCALE_2) / CLOCK_SPEED);
+    //sprintf(buf, "%u", rtime);
+    //uart_print(buf);
+	return rtime;
+}
+
 int  __HEAP_START[BYTES_PER_SECTOR]; // 2KB Byte HEAP
 
 caddr_t _sbrk ( int incr )

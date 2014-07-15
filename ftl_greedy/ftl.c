@@ -61,7 +61,9 @@ typedef struct _misc_metadata
     UINT32 cur_mapblk_vpn[MAPBLKS_PER_BANK]; // current write vpn for logging the age mapping info.
     UINT16 gc_vblock; // vblock number for garbage collection
     UINT32 free_blk_cnt; // total number of free block count
+	#if lpn_list_of_cur_vblock_in_sram
     UINT32 lpn_list_of_cur_vblock[PAGES_PER_BLK]; // logging lpn list of current write vblock for GC
+	#endif
     //UINT32 lpn_list_of_gc_vblock[PAGES_PER_BLK];
     UINT16 gc_backup;
     UINT16 gc_backup_for_gc;
@@ -108,14 +110,19 @@ UINT32 				  g_ftl_write_buf_id;
 #define inc_miscblk_vpn(bank)               (g_misc_meta[bank].cur_miscblk_vpn++)
 
 // page-level striping technique (I/O parallelism)
-//#define get_num_bank(lpn)             ((lpn) % NUM_BANKS)
+#define get_num_bank(lpn)             ((lpn) % NUM_BANKS)
 #define get_bad_blk_cnt(bank)         (g_bad_blk_count[bank])
 #define get_cur_write_vpn(bank)       (g_misc_meta[bank].cur_write_vpn)
 #define set_new_write_vpn(bank, vpn)  (g_misc_meta[bank].cur_write_vpn = vpn)
 #define get_gc_vblock(bank)           (g_misc_meta[bank].gc_vblock)
 #define set_gc_vblock(bank, vblock)   (g_misc_meta[bank].gc_vblock = vblock)
+#if lpn_list_of_cur_vblock_in_sram
 #define set_lpn(bank, page_num, lpn)  (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num] = lpn)
 #define get_lpn(bank, page_num)       (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num])
+#else
+#define set_lpn(bank, page_num, lpn)  (write_dram_32(LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK*bank + page_num), lpn))
+#define get_lpn(bank, page_num)       (read_dram_32(LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK*bank + page_num)))
+#endif
 #define get_miscblk_vpn(bank)         (g_misc_meta[bank].cur_miscblk_vpn)
 #define set_miscblk_vpn(bank, vpn)    (g_misc_meta[bank].cur_miscblk_vpn = vpn)
 #define get_mapblk_vpn(bank, mapblk_lbn)      (g_misc_meta[bank].cur_mapblk_vpn[mapblk_lbn])
@@ -169,7 +176,7 @@ static void sanity_check(void)
                               + P_TYPE_BYTES + P_BANK_BYTES + P_VBLOCK_BYTES + P_PAGE_NUM_BYTES + P_SECT_OFFSET_BYTES + P_NUM_SECTORS_BYTES
                               + P_BUF_ADDR_BYTES + P_G_FTL_RW_BUF_ID_BYTES + P_SRC_VBLOCK_BYTES + P_SRC_PAGE_BYTES + P_DST_VBLOCK_BYTES
                               + P_DST_PAGE_BYTES + P_NEXT_NODE_BYTES + P_PREV_NODE_BYTES + P_ISSUE_FLAG_BYTES + P_LPN_BYTES
-                              + P_ID_BYTES + P_BANK_STATE_BYTES + LPN_LIST_OF_GC_VBLOCK_BYTES;
+                              + P_ID_BYTES + P_BANK_STATE_BYTES + LPN_LIST_OF_CUR_VBLOCK_BYTES + LPN_LIST_OF_GC_VBLOCK_BYTES + TIMESTAMP_BYTES;
                               /*+ P_CAP_BUFFER_BYTES + WBUF_VDATA_BYTES + P_CAP_R_BUFFER_BYTES + P_CAP_W_BUFFER_BYTES
                               + P_CAP_BITMAP_BYTES + P_P2L_BUFFER_BYTES + P_L2P_BUFFER_BYTES;*/
 
@@ -348,7 +355,9 @@ void ftl_open(void)
 
     enable_irq();
 	#if random
-	setRand(ptimer_stop_and_uart_print_scale0());
+	UINT32 key = ptimer_stop_and_uart_print_scale0();
+	setRand(key);
+	uart_printf("key = %u", key);
 	#endif
 }
 void ftl_flush(void)
@@ -366,6 +375,95 @@ void ftl_test_write(UINT32 const lba, UINT32 const num_sectors)
 
     ftl_write(lba, num_sectors);
 }
+
+void dumpTS()
+{
+	for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
+	{
+//		uart_printf("ts %u, budget %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts)
+//									, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 1)));
+		uart_printf("%d", ts);
+		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+		{
+			UINT32 operation = read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4));
+			if(operation == 0)
+				uart_printf("bank %u, length %3u, %u, read", i
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4))
+														);
+			else if(operation == 1)
+				uart_printf("bank %u, length %3u, %u, write", i
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4))
+														);
+			else if(operation == 2)
+				uart_printf("bank %u, length %3u, %u, erase", i
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4))
+														);
+			else if(operation == 3)
+				uart_printf("bank %u, length %3u, %u, idle", i
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3))
+														, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4))
+														);
+			/*
+			if(_BSP_FSM(REAL_BANK(i)) == BANK_IDLE)
+			{
+				//uart_printf("bank %u, length %u, idle %u", i, g_last_page[i].bank_size, q_size[i]);
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 2), g_last_page[i].bank_size);
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 3), 4);
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 4), q_size[i]);
+			}
+			else
+			{
+				//uart_printf("bank %u, length %u, idle %u", i, g_last_page[i].bank_size, q_size[i]);
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 2), g_last_page[i].bank_size);
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 3), read_dram_8(P_BANK_STATE_ADDR + i*sizeof(UINT8)));
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 4), q_size[i]);
+			}*/
+		}
+/*		UINT32 j = read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 26));
+		uart_printf("j=%u", j);			
+		for(UINT8 i = 0 ; i != j ; ++i)
+			uart_printf("evict %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 27 + i)));
+			//write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + 26 + i), buf[i]);
+		uart_printf("ts %u\n", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 31)));	
+*/
+	}
+}
+
+void dumpLen()
+{
+	for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+	{
+		for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
+		{
+			uart_printf("bank %u, len %3u", i, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2)));
+		}
+		uart_printf("\n");
+	}
+	for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
+		uart_print_32(read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts));
+}
+void dumpReq()
+{
+	for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
+	{
+		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)		
+		{
+			uart_printf("bank %u", i);
+			uart_printf("user_write  %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2)));
+			uart_printf("flash_write %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3)));
+			uart_printf("erase_cnt   %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4)));
+		}
+		uart_printf("\n");
+	}
+}
+
 UINT32 user_read=0;
 void ftl_read(UINT32 const lba, UINT32 const num_sectors)
 {
@@ -481,14 +579,44 @@ UINT32 ff_flag = 0 ;
 //UINT32 merge_cnt = 0;
 void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 {
+	++req_cnt;
+	#if dump_len
+	if(req_cnt % 1000 == 0)
+	{
+		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, get_timestamp());
+		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+		{
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_last_page[i].bank_size);
+		}	
+		++ts_index;
+	}
+	#endif
+	#if dump_req
+	if(req_cnt % 50000 == 0)
+	{
+		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+		{
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_ftl_statistics[i].user_write);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 3), g_ftl_statistics[i].flash_write);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 4), g_ftl_statistics[i].erase_cnt);			
+		}	
+		++ts_index;
+	}
+	#endif
     UINT32 remain_sects, num_sectors_to_write;
     UINT32 lpn, sect_offset;
     static UINT8 setTimer = 0;
     if(!setTimer)
     {
         ptimer_start();
+		set_timestamp();
         setTimer = 1;
     }
+	/*
+	if(req_cnt % 50000 == 0)
+		uart_print_32(ptimer_stop_and_uart_print());
+	*/
+	
     lpn          = lba / SECTORS_PER_PAGE;
     sect_offset  = lba % SECTORS_PER_PAGE;
     remain_sects = num_sectors;
@@ -515,10 +643,11 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
         ++user_write;
 
         write_page(lpn, sect_offset, num_sectors_to_write);
+		
         g_ftl_write_buf_id = (g_ftl_write_buf_id + 1 ) % NUM_WR_BUFFERS;
         SETREG(BM_STACK_WRSET, g_ftl_write_buf_id);     		// change bm_write_limit
         SETREG(BM_STACK_RESET, 0x01);                           // change bm_write_limit
-
+		
         sect_offset   = 0;
         remain_sects -= num_sectors_to_write;
         lpn++;
@@ -527,6 +656,16 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 //	if(limit >= 4194346)
     if(lba ==10000005)
     {
+    	UINT32 totalTime = ptimer_stop_and_uart_print();
+    	#if dump
+    	dumpTS();
+		#endif
+		#if dump_len
+		dumpLen();
+		#endif
+		#if dump_req
+		dumpReq();
+		#endif
     	#if greedy == 0
 			#if random == 1
 				#if backlogged == 1
@@ -544,12 +683,14 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 		#else//greedy
 			uart_print("greedy");
 		#endif
-        UINT32 totalTime = ptimer_stop_and_uart_print();
+        
         long double execTime = 0; //ms
         execTime = erase_count*3.171 + gc_write*1.5255 + flash_write*1.319 + (flash_read )*0.7755;
 		uart_printf("total time: %u", totalTime);
+		//uart_printf("flash_read: %u, flash_write: %u, gc_write: %u, erase_count: %u", flash_read, flash_write, gc_write, erase_count);
         //uart_printf("idle time: %lf", 1-execTime / ((long double)totalTime/1000*NUM_BANKS));
-        uart_printf("more: %u, less: %u", more, less);
+        //uart_printf("more: %u, less: %u", more, less);
+		setTimer = 0;
         /*if(g_ftl_statistics[0].gc_cnt>1000)
         	uart_printf("gc_cnt bank[0]=%d",g_ftl_statistics[0].gc_cnt);
         if(g_ftl_statistics[1].gc_cnt>1000)
@@ -577,9 +718,8 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 			uart_printf("wamp: %f", ((float)g_ftl_statistics[i].user_write+g_ftl_statistics[i].flash_write)/g_ftl_statistics[i].user_write);
 		}*/
     }
-
 }
-//UINT32 target = 0;
+UINT32 target = 0;
 UINT32 RMW_page_read = NUM_BANKS;
 static UINT8 cnt = 0;
 static UINT8 in = 0;
@@ -617,11 +757,13 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
     	//++merge_cnt;
         //copy from SATA_W_BUF to LRU_BUF
         //if(no_writeflag)
+        /*
         if(user_write <= 3)
             mem_copy(LRU_ADDR + (page_id* BYTES_PER_PAGE) + (sect_offset * BYTES_PER_SECTOR),
                      WR_BUF_PTR(g_ftl_write_buf_id) + (sect_offset * BYTES_PER_SECTOR) ,
                      num_sectors * BYTES_PER_SECTOR
                     );
+         */
 
 #if RMW_flag == 2
         _set_bit_dram_more(wbuf_vpage_ADDR + page_id * SECTORS_PER_PAGE / 8, sect_offset , num_sectors);
@@ -655,13 +797,14 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
             UINT32 vlpn ;
             UINT32 vbank ;
             //UINT32 rbank;
-
-            for(int i = 0 ; i < NUM_BANKS; i ++ )
+			
+            for(UINT8 i = 0 ; i < NUM_BANKS; i ++ )
             {
-	        	#if greedy == 0
+            	#if greedy == 0
 					#if random == 1
 						#if backlogged == 1
 							randombEvict();
+							//new_randombEvict();
 						#else
 							randomEvict();
 						#endif
@@ -675,11 +818,20 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 				#else//greedy
 					greedyEvict();
 				#endif
-                vbank = i;// target ;
+                vbank = target ;
                 //uart_printf("%d", vbank);
-                if((_BSP_FSM(REAL_BANK(vbank)) != BANK_IDLE) || q_size[vbank] == Q_DEPTH)
+                #if 0//random
+				if(all_cap_full && cap_is_full(vbank))
+				{
+					cap_delete(vbank);
+					target = (target+1) % NUM_BANKS;
+					//uart_print("...");
+					continue;
+				}
+				#endif
+                if( /*(_BSP_FSM(REAL_BANK(vbank)) != BANK_IDLE) &&*/ q_size[vbank] == Q_DEPTH)
                 {
-                    //target = (target+1) % NUM_BANKS;
+					target = (target+1) % NUM_BANKS;
                     continue;
                 }
 
@@ -687,13 +839,13 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
                 UINT32 last_page_flag = check_GC(vbank) ;
                 if(last_page_flag)
                 {
-                    //target = (target+1) % NUM_BANKS;
+                    target = (target+1) % NUM_BANKS;
                     continue ;
                 }
                 if(g_misc_meta[vbank].gcing == 1)
                 {
                     g_misc_meta[vbank].gcing = garbage_collection(vbank) ;
-                    //target = (target+1) % NUM_BANKS;
+                    target = (target+1) % NUM_BANKS;
                     continue ;
                 }
                 /*
@@ -723,20 +875,20 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 #if static_binding
                 if(g_last_page[vbank].bank_tail == 0xFFFF)
                 {
-                    //target = (target+1) % NUM_BANKS;
+                    target = (target+1) % NUM_BANKS;
                     continue;
                 }
 #endif
-                //target = (target+1) % NUM_BANKS;
+				/*
+				if(!all_cap_full && cap_is_full(vbank))
+				{
+					target = (target+1) % NUM_BANKS;
+					continue;
+				}*/
+                target = (target+1) % NUM_BANKS;
                 ///////////
 
                 UINT32 victim_current ;
-
-                if(!all_cap_full && cap_is_full(vbank))
-                    continue;
-				
-
-				
 				
 #if static_binding
                 vlpn = get_lru_lpn(g_last_page[vbank].bank_tail);//LRU_list[g_last_page[vbank].bank_tail].lpn;
@@ -915,12 +1067,13 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
         }
 
         //if(no_writeflag)
+        /*
         if(user_write <= 3)
             mem_copy(LRU_ADDR + (id * BYTES_PER_PAGE),
                      WR_BUF_PTR(g_ftl_write_buf_id),
                      BYTES_PER_PAGE
                     );
-
+		*/
     }
     ff_flag = 0 ;
 }
@@ -1006,8 +1159,12 @@ static UINT32 check_GC(UINT32 const bank)
         // then, because of the flash controller limitation
         // (prohibit accessing a spare area (i.e. OOB)),
         // thus, we persistenly write a lpn list into last page of vblock.
+		#if lpn_list_of_cur_vblock_in_sram
         mem_copy(gc_last_page_ADDR + bank * BYTES_PER_PAGE, g_misc_meta[bank].lpn_list_of_cur_vblock, sizeof(UINT32) * PAGES_PER_BLK);
-        // fix minor bug
+		#else
+		mem_copy(gc_last_page_ADDR + bank * BYTES_PER_PAGE, LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK * bank), sizeof(UINT32) * PAGES_PER_BLK);
+        #endif
+		// fix minor bug
 #if 0//cap
         cap_node node;
         node.type = NAND_PAGE_PTPROGRAM;
@@ -1032,10 +1189,14 @@ static UINT32 check_GC(UINT32 const bank)
                             gc_last_page_ADDR + bank * BYTES_PER_PAGE);
         set_bank_state(bank, 1);
 #endif
-        ++flash_write;
+		++g_ftl_statistics[bank].flash_write;
+        //++flash_write;
         while ((GETREG(WR_STAT) & 0x00000001) != 0);
+		#if lpn_list_of_cur_vblock_in_sram
         mem_set_sram(g_misc_meta[bank].lpn_list_of_cur_vblock, 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);
-
+		#else
+		mem_set_dram(LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK * bank), 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);
+		#endif
         inc_full_blk_cnt(bank);
 
         // do garbage collection if necessary
@@ -1069,9 +1230,7 @@ static BOOL32 is_bad_block(UINT32 const bank, UINT32 const vblk_offset)
 UINT16 gc_count  = 0;
 static UINT32 garbage_collection(UINT32 const bank)
 {
-
     gc_count++ ;
-
     // ASSERT(bank < NUM_BANKS);
     // g_ftl_statistics[bank].gc_cnt++;
 
@@ -1181,7 +1340,8 @@ static UINT32 garbage_collection(UINT32 const bank)
                                    );
                 set_bank_state(bank, 1);
 #endif
-                ++flash_write;
+				++g_ftl_statistics[bank].flash_write;
+                //++flash_write;
                 // mem_set_sram(g_misc_meta[bank].lpn_list_of_gc_vblock, 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);
                 g_misc_meta[bank].gc_backup = gc_backup_vblock;
                 set_vcount(bank,vblock,g_misc_meta[bank].gc_vblock_vcount);
@@ -1445,7 +1605,7 @@ static void format(void)
         */
         uart_printf("group : %d" , group);
         uart_printf("free block : %d" , g_misc_meta[i].free_blk_cnt);
-        while(g_misc_meta[i].free_blk_cnt > 34)
+        while(g_misc_meta[i].free_blk_cnt > 4)
         {
             UINT32 kk = 0;
 
@@ -1465,7 +1625,8 @@ static void format(void)
                 }
                 kk++ ;
                 //nand_page_program(i,first_block,k,FTL_BUF(i));
-                g_misc_meta[i].lpn_list_of_cur_vblock[k] = first_lpn ; // set lpn
+                //g_misc_meta[i].lpn_list_of_cur_vblock[k] = first_lpn ; // set lpn
+				set_lpn(i, k, first_lpn);
                 set_num_bank(first_lpn,i) ;
                 set_vpn(first_lpn, first_block * PAGES_PER_BLK + k);	 // set vpn
 
@@ -1478,7 +1639,11 @@ static void format(void)
             }
             if((first_lpn >= NUM_LPAGES)&&(kk!=127))
                 break ;
+			#if lpn_list_of_cur_vblock_in_sram
             mem_copy(FTL_BUF(i), g_misc_meta[i].lpn_list_of_cur_vblock, sizeof(UINT32) * PAGES_PER_BLK);
+			#else
+			mem_copy(FTL_BUF(i), LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK * i), sizeof(UINT32) * PAGES_PER_BLK);
+			#endif
             nand_page_ptprogram_for_format(i, first_block, PAGES_PER_BLK - 1, 0,
                                            ((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR), FTL_BUF(i));
             inc_full_blk_cnt(i);
