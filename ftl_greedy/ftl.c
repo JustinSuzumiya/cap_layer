@@ -426,42 +426,51 @@ void dumpTS()
 				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + i * 3 + 4), q_size[i]);
 			}*/
 		}
-/*		UINT32 j = read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 26));
-		uart_printf("j=%u", j);			
+		UINT32 j = read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 26));
+		uart_printf("j=%u", j);	
+	
 		for(UINT8 i = 0 ; i != j ; ++i)
 			uart_printf("evict %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 27 + i)));
 			//write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (30 * ts_index + 26 + i), buf[i]);
-		uart_printf("ts %u\n", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 31)));	
-*/
+//		uart_printf("ts %u\n", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 31)));	
+
 	}
 }
 
 void dumpLen()
 {
-	for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
-	{
-		for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
-		{
-			uart_printf("bank %u, len %3u", i, read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2)));
-		}
-		uart_printf("\n");
-	}
 	for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
-		uart_print_32(read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts));
+	{
+		uart_printf("%3u %3u %3u %3u %3u %3u %3u %3u %10u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 0 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 1 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 2 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 3 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 4 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 5 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 6 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + 7 * 3 + 2))
+														  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts)
+														  );
+	}
 }
 void dumpReq()
 {
 	for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
+		uart_print_32(read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts));
+	/*
+	for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
 	{
-		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)		
+		uart_printf("bank %u", i);
+		for(UINT16 ts = 0 ; ts != ts_index ; ++ts)
 		{
-			uart_printf("bank %u", i);
-			uart_printf("user_write  %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2)));
-			uart_printf("flash_write %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3)));
-			uart_printf("erase_cnt   %u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4)));
+			//user_write, flash_write, erase_cnt
+			uart_printf("%6u %6u %4u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 2))
+									 , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 3))
+									 , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts + i * 3 + 4))
+									 );
 		}
-		uart_printf("\n");
-	}
+		uart_printf(" ");
+	}*/
 }
 
 UINT32 user_read=0;
@@ -594,12 +603,14 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 	#if dump_req
 	if(req_cnt % 50000 == 0)
 	{
+		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, get_timestamp());
+		/*
 		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
 		{
 			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_ftl_statistics[i].user_write);
 			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 3), g_ftl_statistics[i].flash_write);
 			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 4), g_ftl_statistics[i].erase_cnt);			
-		}	
+		}*/	
 		++ts_index;
 	}
 	#endif
@@ -656,8 +667,10 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 //	if(limit >= 4194346)
     if(lba ==10000005)
     {
+    	for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+			cap_delete(i);
     	UINT32 totalTime = ptimer_stop_and_uart_print();
-    	#if dump
+    	#if dump_ts
     	dumpTS();
 		#endif
 		#if dump_len
@@ -666,24 +679,28 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 		#if dump_req
 		dumpReq();
 		#endif
-    	#if greedy == 0
-			#if random == 1
-				#if backlogged == 1
-					uart_print("random-b");
-				#else
-					uart_print("random");
+		#if cap
+	    	#if greedy == 0
+				#if random == 1
+					#if backlogged == 1
+						uart_print("random-b");
+					#else
+						uart_print("random");
+					#endif
+				#else //rr
+					#if backlogged == 1
+						uart_print("rrb");
+					#else
+						uart_print("rr");
+					#endif
 				#endif
-			#else //rr
-				#if backlogged == 1
-					uart_print("rrb");
-				#else
-					uart_print("rr");
-				#endif
+			#else//greedy
+				uart_print("greedy");
 			#endif
-		#else//greedy
-			uart_print("greedy");
+		#else
+			uart_print("no cap");
 		#endif
-        
+        uart_printf("total req = %u", req_cnt);
         long double execTime = 0; //ms
         execTime = erase_count*3.171 + gc_write*1.5255 + flash_write*1.319 + (flash_read )*0.7755;
 		uart_printf("total time: %u", totalTime);
@@ -800,11 +817,12 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 			
             for(UINT8 i = 0 ; i < NUM_BANKS; i ++ )
             {
+            	#if cap
             	#if greedy == 0
 					#if random == 1
 						#if backlogged == 1
-							randombEvict();
-							//new_randombEvict();
+							//randombEvict();
+							new_randombEvict();
 						#else
 							randomEvict();
 						#endif
@@ -818,6 +836,7 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 				#else//greedy
 					greedyEvict();
 				#endif
+				#endif
                 vbank = target ;
                 //uart_printf("%d", vbank);
                 #if 0//random
@@ -829,13 +848,11 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 					continue;
 				}
 				#endif
-                if( /*(_BSP_FSM(REAL_BANK(vbank)) != BANK_IDLE) &&*/ q_size[vbank] == Q_DEPTH)
+				if( /*(_BSP_FSM(REAL_BANK(vbank)) != BANK_IDLE) &&*/ q_size[vbank] == Q_DEPTH)
                 {
 					target = (target+1) % NUM_BANKS;
                     continue;
                 }
-
-
                 UINT32 last_page_flag = check_GC(vbank) ;
                 if(last_page_flag)
                 {
@@ -885,6 +902,7 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 					target = (target+1) % NUM_BANKS;
 					continue;
 				}*/
+				
                 target = (target+1) % NUM_BANKS;
                 ///////////
 
@@ -893,8 +911,6 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 #if static_binding
                 vlpn = get_lru_lpn(g_last_page[vbank].bank_tail);//LRU_list[g_last_page[vbank].bank_tail].lpn;
                 victim_current = g_last_page[vbank].bank_tail;
-
-
 
 #endif
 
@@ -1187,7 +1203,7 @@ static UINT32 check_GC(UINT32 const bank)
                             0,
                             ((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR),
                             gc_last_page_ADDR + bank * BYTES_PER_PAGE);
-        set_bank_state(bank, 1);
+		set_bank_state(bank, 1);
 #endif
 		++g_ftl_statistics[bank].flash_write;
         //++flash_write;
@@ -1262,7 +1278,9 @@ static UINT32 garbage_collection(UINT32 const bank)
             g_misc_meta[bank].victim_block  = vt_vblock;
 #if 0
 #else
-            while(canEvict(0) != 1);
+#if cap
+			while(canEvict(0) != 1);
+#endif
             nand_page_ptread(bank,
                              vt_vblock,
                              PAGES_PER_BLK - 1,
@@ -1275,7 +1293,7 @@ static UINT32 garbage_collection(UINT32 const bank)
             ++flash_read;
             //nand_page_ptread(bank, vt_vblock, PAGES_PER_BLK - 1, 0,
             //((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR),FTL_BUF(bank), RETURN_WHEN_DONE);
-            //		mem_copy(g_misc_meta[bank].lpn_list_of_cur_vblock,FTL_BUF(bank), sizeof(UINT32) * PAGES_PER_BLK);
+            //		mem_copy(g_misc_meta[bank].lpn_list_of_cur_vblock,FTL_BUF(bank), sizeof(UINT32) * PAGES_PER_BLK)
 
             return 1 ;
         }
@@ -1563,7 +1581,7 @@ static void format(void)
     uart_print("format complete");
 
     //---------------------------------------
-
+    
     for( int i =  0 ; i < NUM_BANKS ; i++)
     {
 		g_ftl_statistics[i].erase_cnt = g_ftl_statistics[i].flash_write = g_ftl_statistics[i].user_write = 0;

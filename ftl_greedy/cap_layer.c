@@ -213,6 +213,7 @@ UINT16 cap_insert(UINT8 bank, struct cap_node node)
 	P_LPN[new_id] = node.lpn;
 	/***************/
 	//uart_printf("=====cap_insert end====");
+	
 	return new_id;
 }
 
@@ -590,7 +591,9 @@ inline void setRand(UINT32 val)
 	seed = val;
 	//seed = 15947673;
 	//seed = 14388052; 
-	//seed = 13864878;
+	//seed = 13864878;13947455
+	//seed = 14389774;
+	//seed = 14391077; //417029936 us 420528066 us
 }
 
 /*
@@ -644,17 +647,13 @@ void new_randombEvict()
 		if(q_size[i] && _BSP_FSM(REAL_BANK(i)) == BANK_IDLE)
 			pending[j++] = i;
 		
-
-	/*
-	for(UINT8 i = 0 ; i != idle ; ++i)
-	{
-		cap_delete(pending[evict]);
-		evict = (evict + 1) % NUM_BANKS;
-	}*/
 	UINT32 ts = get_timestamp();
 	k = j;
+	UINT8 idle = (LIMIT - currentPower())/WRITE_POWER ;
+	if(k > idle)
+		k = idle;
 	UINT8 evict = randNum() % j;
-	while(canEvict(1) && k)
+	while(k)
 	{
 		if(pending[evict] != -1)
 		{
@@ -664,7 +663,10 @@ void new_randombEvict()
 		}
 		evict = randNum() % j;
 		if(get_timestamp() - ts > 1000000)
+		{
 			uart_printf("rand loop...");
+			ts = get_timestamp();
+		}
 	}
 }
 void randombEvict()
@@ -697,16 +699,16 @@ void randombEvict()
 		++more;
 	else
 		++less;
-	#if dump
-	//if(req_cnt >= 253000 && ts_index != 50)
-	if(req_cnt % 10000 == 0)
+	#if dump_ts
+	//if(req_cnt % 10000 == 0)
+	if(req_cnt >= 2000 && ts_index != 100)
 	{
-//		UINT32 ts = get_timestamp();
+		UINT32 ts = get_timestamp();
 		
 		//if(ts - prev_ts >= 500)
 		{
-//			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, ts);
-//			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 1), idle);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, ts);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 1), idle);
 			for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
 			{
 				if(_BSP_FSM(REAL_BANK(i)) == BANK_IDLE)
@@ -725,9 +727,9 @@ void randombEvict()
 					write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 4), P_BANK_STATE[i]);
 				}
 			}
-//			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 26), j);			
-//			for(UINT8 i = 0 ; i != j ; ++i)
-//				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 27 + i), buf[i]);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 26), j);			
+			for(UINT8 i = 0 ; i != j ; ++i)
+				write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 27 + i), buf[i]);
 //			prev_ts = get_timestamp();
 //			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + 31), prev_ts);			
 			++ts_index;
@@ -835,7 +837,7 @@ void greedyEvict()
 			uart_printf("%u: %u", buf[i], buf_size[i]);
 		uart_printf("\n");
 	}*/
-	#if dump
+	#if dump_ts
 	if(req_cnt % 10000 == 0)
 	{
 //		UINT32 ts = get_timestamp();

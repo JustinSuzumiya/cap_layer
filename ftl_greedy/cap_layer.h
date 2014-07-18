@@ -10,16 +10,16 @@
 #define random 0
 #define backlogged 1
 #define greedy 1
-#define dump 0
+#define dump_ts 0
 #define dump_len 0
 #define dump_req 0
 #define lpn_list_of_cur_vblock_in_sram 1
 
-#define READ_POWER 40
-#define WRITE_POWER 40
-#define ERASE_POWER 40
+#define READ_POWER 1
+#define WRITE_POWER 1
+#define ERASE_POWER 1
 
-#define LIMIT 160
+#define LIMIT 4
 
 #define SWAP(TYPE, a, b) \
 	do{ TYPE t = (a); (a) = (b); (b) = t; }while(0)

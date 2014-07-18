@@ -132,12 +132,10 @@ void init_jasmine(void)
 
     ftl_open();
 
-
 	#if OPTION_FTL_TEST == TRUE
 	extern void ftl_test();
 	ftl_test();
     led(1);
     while (1);
     #endif
-  
 }
