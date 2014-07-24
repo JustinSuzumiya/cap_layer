@@ -116,12 +116,17 @@ UINT32 				  g_ftl_write_buf_id;
 #define set_new_write_vpn(bank, vpn)  (g_misc_meta[bank].cur_write_vpn = vpn)
 #define get_gc_vblock(bank)           (g_misc_meta[bank].gc_vblock)
 #define set_gc_vblock(bank, vblock)   (g_misc_meta[bank].gc_vblock = vblock)
+#ifndef INVERSE_PAGE_MAP
 #if lpn_list_of_cur_vblock_in_sram
 #define set_lpn(bank, page_num, lpn)  (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num] = lpn)
 #define get_lpn(bank, page_num)       (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num])
 #else
 #define set_lpn(bank, page_num, lpn)  (write_dram_32(LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK*bank + page_num), lpn))
 #define get_lpn(bank, page_num)       (read_dram_32(LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK*bank + page_num)))
+#endif
+#else
+#define set_lpn(bank, page_num, lpn)  (write_dram_32(INVERSE_PAGE_MAP_ADDR + sizeof(UINT32) * (PAGES_PER_BANK*bank + page_num), lpn))
+#define get_lpn(bank, page_num)       (read_dram_32(INVERSE_PAGE_MAP_ADDR + sizeof(UINT32) * (PAGES_PER_BANK*bank + page_num)))
 #endif
 #define get_miscblk_vpn(bank)         (g_misc_meta[bank].cur_miscblk_vpn)
 #define set_miscblk_vpn(bank, vpn)    (g_misc_meta[bank].cur_miscblk_vpn = vpn)
@@ -168,7 +173,7 @@ extern UINT16 LRU_size;
 static void sanity_check(void)
 {
     UINT32 dram_requirement = RD_BUF_BYTES + WR_BUF_BYTES + COPY_BUF_BYTES + FTL_BUF_BYTES
-                              + HIL_BUF_BYTES + TEMP_BUF_BYTES + BAD_BLK_BMP_BYTES + PAGE_MAP_BYTES + VCOUNT_BYTES
+                              + HIL_BUF_BYTES + TEMP_BUF_BYTES + BAD_BLK_BMP_BYTES + PAGE_MAP_BYTES + INVERSE_PAGE_MAP_BYTES + VCOUNT_BYTES
                               + LRU_BYTES + HASH_TABLE_BYTES + BLK_TABLE_BYTES
                               + gc_last_page_BYTES + bank_list_BYTES + last_page_BYTES + wbuf_vpage_BYTES + RMW_page_BYTES
                               + RMW_target_bank_BYTES + lru_list_lpn_BYTES + lru_list_prev_BYTES + lru_list_next_BYTES
@@ -997,8 +1002,11 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
                     }
                     if(vbank!= old_bank)
                         set_num_bank(vlpn , vbank);
-
+				#ifndef INVERSE_PAGE_MAP
                     set_lpn(vbank, new_page_num, vlpn);
+				#else
+					set_lpn(vbank, new_block * PAGES_PER_BLK + new_page_num, vlpn);
+				#endif
                     set_vpn(vlpn, new_vpn);
                     set_vcount(vbank, new_block, get_vcount(vbank, new_block) + 1);
 
@@ -1172,6 +1180,7 @@ static UINT32 check_GC(UINT32 const bank)
     // the last page offset of vblock (i.e. PAGES_PER_BLK - 1),
     if ((write_vpn % PAGES_PER_BLK) == (PAGES_PER_BLK - 1))
     {
+#ifndef INVERSE_PAGE_MAP
         // then, because of the flash controller limitation
         // (prohibit accessing a spare area (i.e. OOB)),
         // thus, we persistenly write a lpn list into last page of vblock.
@@ -1181,7 +1190,7 @@ static UINT32 check_GC(UINT32 const bank)
 		mem_copy(gc_last_page_ADDR + bank * BYTES_PER_PAGE, LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK * bank), sizeof(UINT32) * PAGES_PER_BLK);
         #endif
 		// fix minor bug
-#if 0//cap
+	#if 0//cap
         cap_node node;
         node.type = NAND_PAGE_PTPROGRAM;
         node.bank = bank;
@@ -1193,10 +1202,10 @@ static UINT32 check_GC(UINT32 const bank)
         node.lpn = 0xFFFFFFFF;
         cap_insert(bank, node);
 
-#else
-#if cap
+	#else
+		#if cap
         while(canEvict(1) != 1);
-#endif
+		#endif
         nand_page_ptprogram(bank,
                             vblock,
                             PAGES_PER_BLK - 1,
@@ -1204,7 +1213,7 @@ static UINT32 check_GC(UINT32 const bank)
                             ((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR),
                             gc_last_page_ADDR + bank * BYTES_PER_PAGE);
 		set_bank_state(bank, 1);
-#endif
+	#endif
 		++g_ftl_statistics[bank].flash_write;
         //++flash_write;
         while ((GETREG(WR_STAT) & 0x00000001) != 0);
@@ -1213,6 +1222,7 @@ static UINT32 check_GC(UINT32 const bank)
 		#else
 		mem_set_dram(LPN_LIST_OF_CUR_VBLOCK_ADDR + sizeof(UINT32) * (PAGES_PER_BLK * bank), 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);
 		#endif
+#endif
         inc_full_blk_cnt(bank);
 
         // do garbage collection if necessary
@@ -1271,16 +1281,14 @@ static UINT32 garbage_collection(UINT32 const bank)
 
     while(1)
     {
-
         if(g_misc_meta[bank].victim_block == NUM_VBLKS)
         {
             vt_vblock = get_vt_vblock(bank);
             g_misc_meta[bank].victim_block  = vt_vblock;
-#if 0
-#else
-#if cap
+#ifndef INVERSE_PAGE_MAP
+	#if cap
 			while(canEvict(0) != 1);
-#endif
+	#endif
             nand_page_ptread(bank,
                              vt_vblock,
                              PAGES_PER_BLK - 1,
@@ -1289,13 +1297,13 @@ static UINT32 garbage_collection(UINT32 const bank)
                              last_page_ADDR + sizeof(UINT32) * bank * PAGES_PER_BLK,
                              2);
             set_bank_state(bank, 0);
-#endif
             ++flash_read;
             //nand_page_ptread(bank, vt_vblock, PAGES_PER_BLK - 1, 0,
             //((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR),FTL_BUF(bank), RETURN_WHEN_DONE);
             //		mem_copy(g_misc_meta[bank].lpn_list_of_cur_vblock,FTL_BUF(bank), sizeof(UINT32) * PAGES_PER_BLK)
-
+            
             return 1 ;
+#endif
         }
         else
         {
@@ -1329,13 +1337,14 @@ static UINT32 garbage_collection(UINT32 const bank)
         {
             if(g_misc_meta[bank].cur_freevpn == 127)
             {
+            	UINT32 vblock = (free_vpn / PAGES_PER_BLK) ;
+#ifndef INVERSE_PAGE_MAP
                 //uart_printf("test==127");
                 //  uart_printf("run out gc block  : %d" , g_misc_meta[bank].gc_vblock_vcount);
                 //uart_printf("change");
                 //mem_copy(FTL_BUF(bank), g_misc_meta[bank].lpn_list_of_gc_vblock, sizeof(UINT32) * PAGES_PER_BLK);
 				mem_copy(FTL_BUF(bank), LPN_LIST_OF_GC_VBLOCK_ADDR + bank * PAGES_PER_BLK * sizeof(UINT32), sizeof(UINT32) * PAGES_PER_BLK);
-                UINT32 vblock = (free_vpn / PAGES_PER_BLK) ;
-#if 0//cap
+	#if 0//cap
                 cap_node node;
                 node.type = NAND_PAGE_PTPROGRAM;
                 node.bank = bank;
@@ -1345,10 +1354,10 @@ static UINT32 garbage_collection(UINT32 const bank)
                 node.num_sectors =  (sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR;
                 node.buf_addr = FTL_BUF(bank);
                 cap_insert(bank, node);
-#else
-#if cap
+	#else
+		#if cap
                 while(canEvict(1) != 1);
-#endif
+		#endif
                 nand_page_ptprogram(bank,
                                     vblock,
                                     PAGES_PER_BLK - 1,
@@ -1357,10 +1366,11 @@ static UINT32 garbage_collection(UINT32 const bank)
                                     FTL_BUF(bank)
                                    );
                 set_bank_state(bank, 1);
-#endif
+	#endif
 				++g_ftl_statistics[bank].flash_write;
                 //++flash_write;
-                // mem_set_sram(g_misc_meta[bank].lpn_list_of_gc_vblock, 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);
+#endif                
+                // mem_set_sram(g_misc_meta[bank].lpn_list_of_gc_vblock, 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);                
                 g_misc_meta[bank].gc_backup = gc_backup_vblock;
                 set_vcount(bank,vblock,g_misc_meta[bank].gc_vblock_vcount);
                 set_gc_vblock(bank,backup_vblock);
@@ -1369,12 +1379,18 @@ static UINT32 garbage_collection(UINT32 const bank)
                 g_misc_meta[bank].gc_over = 1;
                 g_misc_meta[bank].cur_freevpn = 0;
                 g_misc_meta[bank].gc_vblock_vcount = 0;
+#ifndef INVERSE_PAGE_MAP
                 return 1 ;
+#endif
             }
             // get lpn of victim block from a read lpn list
 
             // src_lpn = get_lpn(bank, src_page);
+#ifndef INVERSE_PAGE_MAP
             src_lpn = read_dram_32(last_page_ADDR + sizeof(UINT32)*(bank * PAGES_PER_BLK + src_page));
+#else
+			src_lpn = read_dram_32(INVERSE_PAGE_MAP_ADDR + sizeof(UINT32)*(bank * PAGES_PER_BANK + vt_vblock * PAGES_PER_BLK + src_page));
+#endif
             //uart_printf("%d " , g_misc_meta[bank].cur_freevpn);
 
             CHECK_LPAGE(src_lpn);
@@ -1431,7 +1447,11 @@ static UINT32 garbage_collection(UINT32 const bank)
             //   set_lpn(bank, (free_vpn % PAGES_PER_BLK), src_lpn);
             UINT32 page_num = free_vpn % PAGES_PER_BLK;
             //g_misc_meta[bank].lpn_list_of_gc_vblock[page_num] = src_lpn;
+		#ifndef INVERSE_PAGE_MAP
 			write_dram_32(LPN_LIST_OF_GC_VBLOCK_ADDR + (bank*PAGES_PER_BLK + page_num)*sizeof(UINT32), src_lpn);
+		#else
+			set_lpn(bank, free_vpn, src_lpn);
+		#endif
             //	uart_printf("gc_count : %d vcount : %d ,src_page : %d cur_freevpn : %d" , gc_count, vcount , src_page , g_misc_meta[bank].cur_freevpn);
             src_page++;
             g_misc_meta[bank].src_page = src_page ;
@@ -1525,6 +1545,8 @@ static void format(void)
     uart_printf("VBLKS_PER_BANK: %d", VBLKS_PER_BANK);
     uart_printf("LBLKS_PER_BANK: %d", NUM_LPAGES / PAGES_PER_BLK / NUM_BANKS);
     uart_printf("META_BLKS_PER_BANK: %d", META_BLKS_PER_BANK);
+	uart_printf("PAGE_MAP_SIZE: %d KB", PAGE_MAP_BYTES / 1024);
+	uart_printf("INVERSE_PAGE_MAP_SIZE: %d KB", INVERSE_PAGE_MAP_BYTES / 1024);
     uart_printf("LRU_BUF_SIZE: %d KB", LRU_BYTES / 1024);
     uart_printf("HASH_TABLE_SIZE: %d KB", HASH_TABLE_BYTES / 1024);
     uart_printf("BLK_TABLE_SIZE: %d KB", BLK_TABLE_BYTES / 1024);
@@ -1579,7 +1601,53 @@ static void format(void)
     write_format_mark();
     led(1);
     uart_print("format complete");
-
+/*test flash program/erase time
+	set_timestamp();
+	for(int i = 0 ; i != NUM_BANKS ; ++i)
+	{
+		UINT32 first_vpn = get_cur_write_vpn(i) ;
+        UINT32 first_block = first_vpn / PAGES_PER_BLK ;
+		UINT32 page = 0;
+		UINT32 ts;
+		do
+		{
+			first_block += 5;
+		}while(get_vcount(i, first_block) == VC_MAX);
+		set_new_write_vpn(i, first_block * PAGES_PER_BLK);
+		first_vpn = get_cur_write_vpn(i);
+		for(int page = 1 ; page != 127 ; ++page)
+		{
+			ts = get_timestamp();
+			nand_page_program(i,
+		                      first_block,
+		                      page,
+		                      LRU_ADDR
+		                     );
+			while(_BSP_FSM(REAL_BANK(i)) != BANK_IDLE);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * ts_index, get_timestamp() - ts);
+			++ts_index;
+		}
+		ts = get_timestamp();
+		nand_block_erase(i, first_block);
+		while(_BSP_FSM(REAL_BANK(i)) != BANK_IDLE);
+		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * ts_index, get_timestamp() - ts);
+		++ts_index;
+	}
+	for(int ts = 0 ; ts != 127 ; ++ts)
+	
+	{
+		uart_printf("%4u %4u %4u %4u %4u %4u %4u %4u", read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*0 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*1 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*2 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*3 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*4 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*5 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*6 + ts))
+													  , read_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (127*7 + ts))
+													  );
+	}
+	while(1);
+*/
     //---------------------------------------
     
     for( int i =  0 ; i < NUM_BANKS ; i++)
@@ -1644,7 +1712,11 @@ static void format(void)
                 kk++ ;
                 //nand_page_program(i,first_block,k,FTL_BUF(i));
                 //g_misc_meta[i].lpn_list_of_cur_vblock[k] = first_lpn ; // set lpn
+			#ifndef INVERSE_PAGE_MAP
 				set_lpn(i, k, first_lpn);
+			#else
+				set_lpn(i, first_block * PAGES_PER_BLK + k, first_lpn);
+			#endif
                 set_num_bank(first_lpn,i) ;
                 set_vpn(first_lpn, first_block * PAGES_PER_BLK + k);	 // set vpn
 
@@ -1657,6 +1729,7 @@ static void format(void)
             }
             if((first_lpn >= NUM_LPAGES)&&(kk!=127))
                 break ;
+		#ifndef INVERSE_PAGE_MAP
 			#if lpn_list_of_cur_vblock_in_sram
             mem_copy(FTL_BUF(i), g_misc_meta[i].lpn_list_of_cur_vblock, sizeof(UINT32) * PAGES_PER_BLK);
 			#else
@@ -1664,6 +1737,8 @@ static void format(void)
 			#endif
             nand_page_ptprogram_for_format(i, first_block, PAGES_PER_BLK - 1, 0,
                                            ((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR), FTL_BUF(i));
+		#endif
+		
             inc_full_blk_cnt(i);
             //uart_printf("full_cnt : %d" , g_misc_meta[i].free_blk_cnt);
             set_vcount(i,first_block,127);

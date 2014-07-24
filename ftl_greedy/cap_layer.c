@@ -589,6 +589,7 @@ inline UINT32 randNum()
 inline void setRand(UINT32 val)
 {
 	seed = val;
+	//srand(val);
 	//seed = 15947673;
 	//seed = 14388052; 
 	//seed = 13864878;13947455
@@ -652,7 +653,7 @@ void new_randombEvict()
 	UINT8 idle = (LIMIT - currentPower())/WRITE_POWER ;
 	if(k > idle)
 		k = idle;
-	UINT8 evict = randNum() % j;
+	UINT8 evict = randNum() % j; //rand() % j;
 	while(k)
 	{
 		if(pending[evict] != -1)
@@ -661,7 +662,7 @@ void new_randombEvict()
 			pending[evict] = -1;
 			--k;
 		}
-		evict = randNum() % j;
+		evict = randNum() % j; //rand() % j;
 		if(get_timestamp() - ts > 1000000)
 		{
 			uart_printf("rand loop...");

@@ -11,9 +11,10 @@
 #define backlogged 1
 #define greedy 1
 #define dump_ts 0
-#define dump_len 0
+#define dump_len 1
 #define dump_req 0
-#define lpn_list_of_cur_vblock_in_sram 1
+#define lpn_list_of_cur_vblock_in_sram 0
+#define INVERSE_PAGE_MAP
 
 #define READ_POWER 1
 #define WRITE_POWER 1
