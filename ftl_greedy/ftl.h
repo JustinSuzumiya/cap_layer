@@ -38,7 +38,7 @@
 #define NUM_TEMP_BUFFERS	1
 
 #define real_size        	768
-#define LRU_BUF_SIZE		1024
+#define LRU_BUF_SIZE		1280
 #define RMW_flag			2			// 1 : RMW_buffer  2 : RMW_evict
 #define static_binding		1
 

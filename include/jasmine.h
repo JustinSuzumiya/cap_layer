@@ -32,6 +32,9 @@
 #define OPTION_SUPPORT_NCQ		0	// 1 = support SATA NCQ (=FPDMA) for AHCI hosts, 0 = support only DMA mode
 #define OPTION_REDUCED_CAPACITY	1	// reduce the number of blocks per bank for testing purpose
 
+//#define OVER_PROVISION			5	// 10%
+//#define DISK_SIZE				20	// 40G
+
 #define CHN_WIDTH			2 	// 2 = 16bit IO
 #define NUM_CHNLS_MAX		4
 #define BANKS_PER_CHN_MAX	8
@@ -177,8 +180,9 @@ typedef struct
 // original
 // #define NUM_LSECTORS	(21168 + ((NUM_PSECTORS) / 2097152 * 1953504)) // 125045424, 9172304(provisioning ratio: 7.3%)
 
-// #define NUM_LSECTORS	(NUM_PSECTORS  / 100 * 86) // 14% provisioning
-#define NUM_LSECTORS	(NUM_PSECTORS  / 100 * 95) // 7% provisioning
+//#define NUM_LSECTORS	(NUM_PSECTORS  / 100 * 86) // 14% provisioning
+#define NUM_LSECTORS	(NUM_PSECTORS  / 100 * 89) // 7% provisioning
+//#define NUM_LSECTORS	(DISK_SIZE << 21) // 7% provisioning
 
 #include "ftl.h"
 #include "misc.h"

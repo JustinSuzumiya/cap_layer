@@ -583,12 +583,12 @@ inline UINT32 randNum()
 {
 	const UINT32 c = 1103515245, d = 12345;
 	seed = (c*seed + d);
-	return seed & 0xFFFF;
+	return seed;
 }
-
 inline void setRand(UINT32 val)
 {
 	seed = val;
+	//seed = 6717837;
 	//srand(val);
 	//seed = 15947673;
 	//seed = 14388052; 

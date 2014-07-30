@@ -52,6 +52,7 @@ typedef struct _ftl_statistics
 	UINT32 erase_cnt;
 	UINT32 user_write;
 	UINT32 flash_write;
+	UINT32 flash_read;
 } ftl_statistics;
 
 typedef struct _misc_metadata
@@ -590,91 +591,23 @@ void ftl_read(UINT32 const lba, UINT32 const num_sectors)
 }
 UINT32 flash_write=0, gc_write=0, user_write=0, flash_read, erase_count=0,lefthole=0,righthole=0,no_writeflag=1 , limit = 0;
 UINT32 ff_flag = 0 ;
+UINT64 wait_for_sata = 0;
 //UINT32 merge_cnt = 0;
 void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 {
-	++req_cnt;
-	#if dump_len
-	if(req_cnt % 1000 == 0)
-	{
-		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, get_timestamp());
-		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
-		{
-			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_last_page[i].bank_size);
-		}	
-		++ts_index;
-	}
-	#endif
-	#if dump_req
-	if(req_cnt % 50000 == 0)
-	{
-		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, get_timestamp());
-		/*
-		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
-		{
-			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_ftl_statistics[i].user_write);
-			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 3), g_ftl_statistics[i].flash_write);
-			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 4), g_ftl_statistics[i].erase_cnt);			
-		}*/	
-		++ts_index;
-	}
-	#endif
-    UINT32 remain_sects, num_sectors_to_write;
-    UINT32 lpn, sect_offset;
-    static UINT8 setTimer = 0;
+	static UINT8 setTimer = 0;
     if(!setTimer)
     {
-        ptimer_start();
+        //ptimer_start();
 		set_timestamp();
         setTimer = 1;
     }
-	/*
-	if(req_cnt % 50000 == 0)
-		uart_print_32(ptimer_stop_and_uart_print());
-	*/
-	
-    lpn          = lba / SECTORS_PER_PAGE;
-    sect_offset  = lba % SECTORS_PER_PAGE;
-    remain_sects = num_sectors;
-
-    //uart_printf("lba=%d",lba);
-    limit += num_sectors ;
-
-    while (remain_sects != 0)
-    {
-#if OPTION_FTL_TEST == 0
-        while (g_ftl_write_buf_id == GETREG(SATA_WBUF_PTR));
-#endif
-
-        if ((sect_offset + remain_sects) < SECTORS_PER_PAGE)
-        {
-            ff_flag = 1 ;
-            num_sectors_to_write = remain_sects;
-        }
-        else
-        {
-            num_sectors_to_write = SECTORS_PER_PAGE - sect_offset;
-        }
-        // single page write individually
-        ++user_write;
-
-        write_page(lpn, sect_offset, num_sectors_to_write);
-		
-        g_ftl_write_buf_id = (g_ftl_write_buf_id + 1 ) % NUM_WR_BUFFERS;
-        SETREG(BM_STACK_WRSET, g_ftl_write_buf_id);     		// change bm_write_limit
-        SETREG(BM_STACK_RESET, 0x01);                           // change bm_write_limit
-		
-        sect_offset   = 0;
-        remain_sects -= num_sectors_to_write;
-        lpn++;
-    }
-
-//	if(limit >= 4194346)
-    if(lba ==10000005)
+	++req_cnt;
+	if(lba ==10000005)
     {
     	for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
 			cap_delete(i);
-    	UINT32 totalTime = ptimer_stop_and_uart_print();
+    	UINT32 totalTime = get_timestamp(); //ptimer_stop_and_uart_print();
     	#if dump_ts
     	dumpTS();
 		#endif
@@ -706,8 +639,8 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
 			uart_print("no cap");
 		#endif
         uart_printf("total req = %u", req_cnt);
-        long double execTime = 0; //ms
-        execTime = erase_count*3.171 + gc_write*1.5255 + flash_write*1.319 + (flash_read )*0.7755;
+        /*long double execTime = 0; //ms
+        execTime = erase_count*3.171 + gc_write*1.5255 + flash_write*1.319 + (flash_read )*0.7755;*/
 		uart_printf("total time: %u", totalTime);
 		//uart_printf("flash_read: %u, flash_write: %u, gc_write: %u, erase_count: %u", flash_read, flash_write, gc_write, erase_count);
         //uart_printf("idle time: %lf", 1-execTime / ((long double)totalTime/1000*NUM_BANKS));
@@ -730,16 +663,90 @@ void ftl_write(UINT32 const lba, UINT32 const num_sectors)
         uart_printf("left hole=%d",lefthole);
         uart_printf("right hole=%d",righthole);
         */
-        /*
+        
         for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
 		{
 			uart_printf("bank %u", i);
-			uart_printf("user_write: %u", g_ftl_statistics[i].user_write);
-			uart_printf("flash_write: %u", g_ftl_statistics[i].flash_write);
-			uart_printf("erase_cnt: %u", g_ftl_statistics[i].erase_cnt);
-			uart_printf("wamp: %f", ((float)g_ftl_statistics[i].user_write+g_ftl_statistics[i].flash_write)/g_ftl_statistics[i].user_write);
-		}*/
+			uart_printf("user_write: %u, flash_write: %u, erase_cnt: %u, flash_read: %u, wamp: %f"
+						, g_ftl_statistics[i].user_write
+						, g_ftl_statistics[i].flash_write
+						, g_ftl_statistics[i].erase_cnt
+						, g_ftl_statistics[i].flash_read
+					, ((float)g_ftl_statistics[i].user_write+g_ftl_statistics[i].flash_write)/g_ftl_statistics[i].user_write);
+		}
+		uart_print_32(wait_for_sata);
     }
+	
+	#if dump_len
+	if(req_cnt % 1000 == 0)
+	{
+		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, get_timestamp());
+		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+		{
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_last_page[i].bank_size);
+		}	
+		++ts_index;
+	}
+	#endif
+	#if dump_req
+	if(req_cnt % 1000 == 0)
+	{
+		write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * 32 * ts_index, get_timestamp());
+		/*
+		for(UINT8 i = 0 ; i != NUM_BANKS ; ++i)
+		{
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 2), g_ftl_statistics[i].user_write);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 3), g_ftl_statistics[i].flash_write);
+			write_dram_32(TIMESTAMP_ADDR + sizeof(UINT32) * (32 * ts_index + i * 3 + 4), g_ftl_statistics[i].erase_cnt);			
+		}*/	
+		++ts_index;
+	}
+	#endif
+    UINT32 remain_sects, num_sectors_to_write;
+    UINT32 lpn, sect_offset;
+	/*
+	if(req_cnt % 50000 == 0)
+		uart_print_32(ptimer_stop_and_uart_print());
+	*/
+	
+    lpn          = lba / SECTORS_PER_PAGE;
+    sect_offset  = lba % SECTORS_PER_PAGE;
+    remain_sects = num_sectors;
+
+    //uart_printf("lba=%d",lba);
+    limit += num_sectors ;
+
+    while (remain_sects != 0)
+    {
+#if OPTION_FTL_TEST == 0
+		UINT32 ts = get_timestamp();
+        while (g_ftl_write_buf_id == GETREG(SATA_WBUF_PTR));
+		wait_for_sata += get_timestamp() - ts;
+#endif
+
+        if ((sect_offset + remain_sects) < SECTORS_PER_PAGE)
+        {
+            ff_flag = 1 ;
+            num_sectors_to_write = remain_sects;
+        }
+        else
+        {
+            num_sectors_to_write = SECTORS_PER_PAGE - sect_offset;
+        }
+        // single page write individually
+        ++user_write;
+
+        write_page(lpn, sect_offset, num_sectors_to_write);
+		
+        g_ftl_write_buf_id = (g_ftl_write_buf_id + 1 ) % NUM_WR_BUFFERS;
+        SETREG(BM_STACK_WRSET, g_ftl_write_buf_id);     		// change bm_write_limit
+        SETREG(BM_STACK_RESET, 0x01);                           // change bm_write_limit
+		
+        sect_offset   = 0;
+        remain_sects -= num_sectors_to_write;
+        lpn++;
+    }
+
 }
 UINT32 target = 0;
 UINT32 RMW_page_read = NUM_BANKS;
@@ -859,11 +866,13 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
                     continue;
                 }
                 UINT32 last_page_flag = check_GC(vbank) ;
+			#ifndef INVERSE_PAGE_MAP
                 if(last_page_flag)
                 {
                     target = (target+1) % NUM_BANKS;
                     continue ;
                 }
+			#endif
                 if(g_misc_meta[vbank].gcing == 1)
                 {
                     g_misc_meta[vbank].gcing = garbage_collection(vbank) ;
@@ -926,6 +935,8 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
                 ////////////////
                 if(!(_tst_bit_dram_more(wbuf_vpage_ADDR + SECTORS_PER_PAGE * victim_current / 8)))
                 {
+                	++g_ftl_statistics[vbank].flash_read;
+                	/*
                     if(vbank == old_bank)
                     {
 			#if cap
@@ -959,10 +970,10 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
                         ASSERT(static_binding != 1);
                         insertTAIL_bankLRU(vlpn);
                   //      g_misc_meta[vbank].you_need_read = 1 ;
-                    }
+                    }*/
 
                 }
-                else
+                //else
                 {
                     new_vpn  = assign_new_write_vpn(vbank);
                     UINT32 new_block = new_vpn / PAGES_PER_BLK;
@@ -1652,7 +1663,7 @@ static void format(void)
     
     for( int i =  0 ; i < NUM_BANKS ; i++)
     {
-		g_ftl_statistics[i].erase_cnt = g_ftl_statistics[i].flash_write = g_ftl_statistics[i].user_write = 0;
+		g_ftl_statistics[i].erase_cnt = g_ftl_statistics[i].flash_write = g_ftl_statistics[i].user_write = g_ftl_statistics[i].flash_read = 0;
 
         UINT32 first_vpn =	get_cur_write_vpn(i) ;
         UINT32 first_block = first_vpn	/ PAGES_PER_BLK ;
@@ -1691,7 +1702,8 @@ static void format(void)
         */
         uart_printf("group : %d" , group);
         uart_printf("free block : %d" , g_misc_meta[i].free_blk_cnt);
-        while(g_misc_meta[i].free_blk_cnt > 4)
+		//uart_printf("bad block : %d", get_bad_blk_cnt(i));
+        while(g_misc_meta[i].free_blk_cnt > 3)
         {
             UINT32 kk = 0;
 
